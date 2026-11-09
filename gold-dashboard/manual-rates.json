@@ -1,0 +1,8 @@
+{
+  "_comment": "Manually entered jeweller rates (INR per gram). Edit and save: the server reloads this file on every poll, no restart needed. 'updatedAt' is when the jeweller published it.",
+  "png": {
+    "name": "PNG Jewellers",
+    "updatedAt": "2026-11-07T10:15:00+05:30",
+    "rates": { "24K": 14195, "22K": 13139, "18K": 11111, "14K": 8497, "9K": 5498, "platinum": 6530, "silver": 189 }
+  }
+}

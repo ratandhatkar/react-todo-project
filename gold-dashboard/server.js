@@ -5,6 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const H = require('./history');
+const { parseGoodreturns, parseGeneric, parseTanishq, parseMalabar, updatedMalabar } = require('./parsers');
 
 const PORT = Number(process.env.PORT) || 4000;
 const MOCK = process.env.MOCK === '1';
@@ -14,9 +15,10 @@ const OZ = 31.1034768;
 // India landed-cost parity assumptions (override via env). Duty on gold; GST excluded from parity.
 const IMPORT_DUTY = Number(process.env.IMPORT_DUTY ?? 0.06);
 
-const UA = 'Mozilla/5.0 (compatible; GoldDashboard/1.0)';
+// Jeweller sites sit behind bot protection and may geo-restrict; a browser-like request from an Indian IP works best.
+const UA = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 async function get(url, asJson) {
-  const r = await fetch(url, { headers: { 'user-agent': UA, accept: '*/*' }, signal: AbortSignal.timeout(15000) });
+  const r = await fetch(url, { headers: { 'user-agent': UA, accept: asJson ? 'application/json,*/*' : 'text/html,application/xhtml+xml,*/*;q=0.8', 'accept-language': 'en-IN,en;q=0.9' }, signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return asJson ? r.json() : r.text();
 }
@@ -67,33 +69,13 @@ function pushHist(k, t, v) {
 }
 
 // ---------- retail (Indian jewellers / benchmarks) ----------
-const num = s => Number(String(s).replace(/[₹,\s]/g, ''));
-// Parses Goodreturns' "Gold Rate Today" markdown/html: first row of the per-gram table.
-function parseGoodreturns(text) {
-  const out = {};
-  for (const k of ['24', '22', '18']) {
-    const m = text.match(new RegExp(`${k}\\s*karat gold[^₹]*₹\\s*([\\d,]+)`, 'i'));
-    if (m) out[k + 'K'] = num(m[1]);
-  }
-  return out;
-}
-// Generic "24K Gold ₹14,195" style parser for jeweller pages that expose plain text.
-function parseGeneric(text) {
-  const out = {};
-  const plain = text.replace(/<[^>]+>/g, ' ').replace(/&#8377;|&rupee;/g, '₹');
-  for (const k of ['24', '22', '18', '14', '9']) {
-    const m = plain.match(new RegExp(`\\b${k}\\s*k(?:t|arat)?\\b[^\\d₹]{0,40}₹?\\s*([\\d,]{4,7})`, 'i'));
-    if (m) out[k + 'K'] = num(m[1]);
-  }
-  return out;
-}
 // Add/adjust jeweller feeds here. URLs can be overridden with env FEED_<ID>.
 // Only goodreturns is verified; the others depend on the jeweller serving rates in static HTML,
 // and show "no feed" in the UI if they don't. Use manual-rates.json to fill gaps.
 const FEEDS = [
   { id: 'goodreturns', name: 'Goodreturns (India avg)', url: 'https://www.goodreturns.in/gold-rates/', parse: parseGoodreturns },
-  { id: 'tanishq', name: 'Tanishq', url: 'https://www.tanishq.co.in/gold-rate.html', parse: parseGeneric },
-  { id: 'malabar', name: 'Malabar Gold & Diamonds', url: 'https://www.malabargoldanddiamonds.com/gold-rate-today', parse: parseGeneric },
+  { id: 'tanishq', name: 'Tanishq', url: 'https://www.tanishq.co.in/gold-rate.html?lang=en_IN', parse: parseTanishq },
+  { id: 'malabar', name: 'Malabar Gold & Diamonds', url: 'https://www.malabargoldanddiamonds.com/in/pan-india/en/live-gold-rate.html', parse: parseMalabar, updated: updatedMalabar },
   { id: 'kalyan', name: 'Kalyan Jewellers', url: 'https://www.kalyanjewellers.net/gold-rate-today.php', parse: parseGeneric },
   { id: 'joyalukkas', name: 'Joyalukkas', url: 'https://www.joyalukkas.in/gold-rate', parse: parseGeneric },
   { id: 'png', name: 'PNG Jewellers', url: 'https://www.pngjewellers.com/todays-rates', parse: parseGeneric },
@@ -121,9 +103,11 @@ async function fetchRetail() {
   await Promise.all(FEEDS.map(async f => {
     const prev = state.retail[f.id];
     try {
-      const rates = f.parse(await get(process.env['FEED_' + f.id.toUpperCase()] || f.url, false));
-      if (!rates['24K'] && !rates['22K']) throw new Error('no rates found in page');
-      state.retail[f.id] = { id: f.id, name: f.name, rates, prevRates: prev && prev.rates, updatedAt: now, fetchedAt: now, source: 'live', status: 'live', error: null };
+      const text = await get(process.env['FEED_' + f.id.toUpperCase()] || f.url, false);
+      const rates = f.parse(text);
+      if (!rates['24K'] && !rates['22K']) throw new Error('no rates found in page (blocked, geo-restricted or layout changed)');
+      const pub = f.updated && f.updated(text);
+      state.retail[f.id] = { id: f.id, name: f.name, rates, prevRates: prev && prev.rates, updatedAt: pub || now, fetchedAt: now, source: 'live', status: 'live', error: null };
     } catch (e) {
       if (!prev || prev.source === 'live' || prev.status === 'nofeed')
         state.retail[f.id] = { ...(prev && prev.rates ? prev : { id: f.id, name: f.name, rates: {} }), status: prev && prev.rates && prev.rates['24K'] ? 'stale' : 'nofeed', error: e.message };

@@ -65,12 +65,17 @@ function render(d){
  $('dot').className='dot on';$('status').textContent='live · '+new Date(d.serverTime).toLocaleTimeString('en-IN');
  const e=d.spot.error;$('banner').style.display=e&&!d.spot.gold?'block':'none';$('banner').textContent='Spot feed error: '+e;
  const s=d.spot,p=d.parity;
+ let spotHtml='';
  if(s.gold){base.g??=p.gold24Raw;base.s??=p.silverRaw;
-  $('spot').innerHTML=`
+  spotHtml+=`
   <div class="card"><div class="lbl">Gold spot (XAU/USD)</div><div class="big ${flash('xau',s.gold.usdOz)}">${usd(s.gold.usdOz)}</div><div class="sub">per oz · ${chg(s.gold.usdOz,s.gold.prevUsdOz,usd)}</div></div>
   <div class="card"><div class="lbl">Gold 24K parity, India</div><div class="big ${flash('gp',p.gold24Landed)}">${inr(p.gold24Landed)}<span class="sub">/g</span></div><div class="sub">spot ${inr(p.gold24Raw)} + ${(p.importDuty*100).toFixed(0)}% duty · ${chg(p.gold24Raw,base.g,inr2)} since open</div>${spark(d.history.gold,'var(--gold)')}</div>
   <div class="card"><div class="lbl">Silver spot (XAG/USD)</div><div class="big ${flash('xag',s.silver.usdOz)}">${usd(s.silver.usdOz)}</div><div class="sub">per oz · ${chg(s.silver.usdOz,s.silver.prevUsdOz,usd)}</div></div>
   <div class="card"><div class="lbl">Silver, India (pre-duty)</div><div class="big">${inr2(p.silverRaw)}<span class="sub">/g</span></div><div class="sub">USD/INR ${s.usdinr.toFixed(3)}</div>${spark(d.history.silver,'var(--silver)')}</div>`}
+ const ref=d.reference||{},dia=ref.diamond,ti=ref.titanium;
+ if(dia)spotHtml+=`<div class="card"><div class="lbl">${dia.name}<span class="badge ${dia.status}">ref.</span></div><div class="big ${flash('dia',dia.rates.carat)}">${inr(dia.rates.carat)}<span class="sub">/ct</span></div><div class="sub">manual reference · no public live feed · updated ${ago(dia.updatedAt)}</div></div>`;
+ if(ti)spotHtml+=`<div class="card"><div class="lbl">${ti.name}<span class="badge ${ti.status}">ref.</span></div><div class="big ${flash('ti',ti.rates.kg)}">${inr(ti.rates.kg)}<span class="sub">/kg</span></div><div class="sub">manual reference · no public live feed · updated ${ago(ti.updatedAt)}</div></div>`;
+ $('spot').innerHTML=spotHtml;
  const order=['goodreturns','tanishq','malabar','kalyan','joyalukkas','png'];
  const rs=[...d.retail].sort((a,b)=>(order.indexOf(a.id)+99)%99-(order.indexOf(b.id)+99)%99);
  $('rows').innerHTML=rs.map(r=>{const R=r.rates||{},has=R['24K']!=null;

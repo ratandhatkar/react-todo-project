@@ -4,5 +4,16 @@
     "name": "PNG Jewellers",
     "updatedAt": "2026-11-07T10:15:00+05:30",
     "rates": { "24K": 14195, "22K": 13139, "18K": 11111, "14K": 8497, "9K": 5498, "platinum": 6530, "silver": 189 }
+  },
+  "_comment2": "diamond/titanium: no free live spot feed exists for either (diamonds aren't commodity-traded; titanium metal pricing isn't publicly published), so these are reference prices you keep up to date by hand.",
+  "diamond": {
+    "name": "Diamond (1ct round, GIA VS1-G reference)",
+    "updatedAt": "2026-11-07T10:15:00+05:30",
+    "rates": { "carat": 420000 }
+  },
+  "titanium": {
+    "name": "Titanium (Grade 2 ingot, commodity)",
+    "updatedAt": "2026-11-07T10:15:00+05:30",
+    "rates": { "kg": 2450 }
   }
 }

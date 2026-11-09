@@ -27,9 +27,12 @@ async function get(url, asJson) {
 const state = {
   spot: { gold: null, silver: null, usdinr: null, updatedAt: null, error: null },
   retail: {}, // id -> {id,name,rates:{24K..},updatedAt,source,status,error}
+  reference: {}, // id -> {id,name,rates:{...}}; non-jeweller, manual-only items (diamond, titanium: no live spot feed exists)
   history: { gold: [], silver: [] }, // [{t, v}] spot, INR/g parity
   serverTime: null,
 };
+// Items with no public live-spot feed; filled from manual-rates.json only, rendered separately from the jeweller table.
+const REFERENCE_IDS = ['diamond', 'titanium'];
 const MAX_HIST = 720;
 
 // ---------- spot (international) ----------
@@ -91,12 +94,23 @@ function mockRetail() {
     malabar: mk('Malabar Gold & Diamonds', 0.998), kalyan: mk('Kalyan Jewellers', 1.002),
     joyalukkas: mk('Joyalukkas', 0.999), png: mk('PNG Jewellers', 1.001) };
 }
+function mockReference() {
+  const t = Date.now() / 1000;
+  const carat = 420000 * (1 + 0.015 * Math.sin(t / 37) + (Math.random() - 0.5) * 0.003);
+  const kg = 2450 * (1 + 0.02 * Math.sin(t / 29) + (Math.random() - 0.5) * 0.004);
+  return {
+    diamond: { name: 'Diamond (1ct round, GIA VS1-G reference)', rates: { carat: Math.round(carat) } },
+    titanium: { name: 'Titanium (Grade 2 ingot, commodity)', rates: { kg: Math.round(kg) } },
+  };
+}
 
 async function fetchRetail() {
   const now = new Date().toISOString();
   if (MOCK) {
     for (const [id, v] of Object.entries(mockRetail()))
       state.retail[id] = { id, name: v.name, rates: v.rates, updatedAt: now, fetchedAt: now, source: 'mock', status: 'mock', error: null };
+    for (const [id, v] of Object.entries(mockReference()))
+      state.reference[id] = { id, name: v.name, rates: v.rates, updatedAt: now, source: 'mock', status: 'mock' };
     H.upsertRetail(Object.values(state.retail).map(r => ({ ...r, status: 'live' })));
     return;
   }
@@ -121,6 +135,10 @@ function applyManual() {
   let m; try { m = JSON.parse(fs.readFileSync(path.join(__dirname, 'manual-rates.json'), 'utf8')); } catch { return; }
   for (const [id, v] of Object.entries(m)) {
     if (id.startsWith('_') || !v.rates) continue;
+    if (REFERENCE_IDS.includes(id)) {
+      state.reference[id] = { id, name: v.name || id, rates: v.rates, updatedAt: v.updatedAt ? new Date(v.updatedAt).toISOString() : null, source: 'manual', status: 'manual' };
+      continue;
+    }
     const cur = state.retail[id];
     if (cur && cur.status === 'live') continue;
     state.retail[id] = { id, name: v.name || id, rates: v.rates, prevRates: cur && cur.prevRates, updatedAt: v.updatedAt ? new Date(v.updatedAt).toISOString() : null, source: 'manual', status: 'manual', error: null };
@@ -141,7 +159,7 @@ function snapshot() {
     if (parity && r.rates && r.rates['24K']) out.premiumPct24 = (r.rates['24K'] / parity.gold24Landed - 1) * 100;
     return out;
   });
-  return { serverTime: new Date().toISOString(), mock: MOCK, spot, parity, retail, history: state.history };
+  return { serverTime: new Date().toISOString(), mock: MOCK, spot, parity, retail, reference: state.reference, history: state.history };
 }
 
 // ---------- http ----------

@@ -4,6 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const H = require('./history');
 
 const PORT = Number(process.env.PORT) || 4000;
 const MOCK = process.env.MOCK === '1';
@@ -37,7 +38,7 @@ async function fetchSpot() {
       const t = Date.now() / 1000;
       gold = 4072 + 6 * Math.sin(t / 20) + (Math.random() - 0.5) * 3;
       silver = 48.2 + 0.2 * Math.sin(t / 25) + (Math.random() - 0.5) * 0.1;
-      usdinr = 88.1 + 0.02 * Math.sin(t / 60);
+      usdinr = 93.9 + 0.02 * Math.sin(t / 60);
     } else {
       const [g, s, fx] = await Promise.all([
         get('https://api.gold-api.com/price/XAU', true),
@@ -53,6 +54,7 @@ async function fetchSpot() {
       usdinr, updatedAt: new Date().toISOString(), error: null,
     };
     const now = Date.now();
+    H.upsertSpot({ xau: gold, xag: silver, inr: usdinr });
     pushHist('gold', now, (gold / OZ) * usdinr);
     pushHist('silver', now, (silver / OZ) * usdinr);
   } catch (e) {
@@ -113,6 +115,7 @@ async function fetchRetail() {
   if (MOCK) {
     for (const [id, v] of Object.entries(mockRetail()))
       state.retail[id] = { id, name: v.name, rates: v.rates, updatedAt: now, fetchedAt: now, source: 'mock', status: 'mock', error: null };
+    H.upsertRetail(Object.values(state.retail).map(r => ({ ...r, status: 'live' })));
     return;
   }
   await Promise.all(FEEDS.map(async f => {
@@ -127,6 +130,7 @@ async function fetchRetail() {
     }
   }));
   applyManual();
+  H.upsertRetail(Object.values(state.retail));
 }
 // Manual file fills in jewellers whose live feed is unavailable.
 function applyManual() {
@@ -162,6 +166,10 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.
 http.createServer((req, res) => {
   const url = req.url.split('?')[0];
   if (url === '/api/rates') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(snapshot())); }
+  if (url === '/api/history') {
+    const range = new URL(req.url, 'http://x').searchParams.get('range') || '1y';
+    res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ mock: MOCK, rows: H.query(range) }));
+  }
   if (url === '/api/stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
@@ -176,7 +184,14 @@ http.createServer((req, res) => {
 }).listen(PORT, () => console.log(`Gold dashboard on http://localhost:${PORT}${MOCK ? ' (MOCK data)' : ''}`));
 
 function broadcast() { const d = `data: ${JSON.stringify(snapshot())}\n\n`; for (const c of clients) c.write(d); }
+async function syncHistory() {
+  try { if (MOCK) H.synthetic(); else await H.ensure(get); } catch (e) { console.error('history sync failed:', e.message); }
+}
+setInterval(() => { try { H.save(); } catch (e) { console.error(e.message); } }, 300000);
+setInterval(syncHistory, 6 * 3600e3); // fills gaps if the server was off for a while
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { try { H.save(); } finally { process.exit(0); } });
 (async () => {
+  H.load(); syncHistory();
   await fetchSpot(); await fetchRetail(); broadcast();
   setInterval(async () => { await fetchSpot(); broadcast(); }, SPOT_MS);
   setInterval(async () => { await fetchRetail(); broadcast(); }, RETAIL_MS);
